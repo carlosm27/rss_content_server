@@ -1,24 +1,11 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from deta import Deta
-from typing import List
-from feed_parser import list_of_links
-import os
+from fastapi import FastAPI, HTTPException
+
+
+from model.rss_link_model import RssLink, users
+
+from service.rss_content import get_key, add_link, append_content
 
 app = FastAPI()
-
-
-load_dotenv()
-PROJECT_KEY = os.environ.get("PROJECT_KEY")
-
-deta = Deta(PROJECT_KEY)
-users = deta.Base("users")
-
-
-class RssLink(BaseModel):
-    ChatId: int
-    Links: List[str]
 
 
 @app.get("/links")
@@ -26,31 +13,45 @@ def all_links():
     return users.fetch()
 
 
+@app.get("/link/{key}")
+def get_user_links(key: str):
+    user = get_key(key)
+    if not user:
+        raise HTTPException(status_code=404, detail="Key not found")
+
+    return user
+
+
 @app.post('/link')
-def add_link(content: RssLink):
-    new_content = users.put({
-        'ChatId': content.ChatId,
-        'links': content.Links
-    })
+def add_content(content: RssLink):
+    new_content = add_link(content)
     return new_content
 
 
 @app.put('/link/{key}')
 def update_content(key: str, content: RssLink):
-    links = content.Links
-    updates = {
-        "ChatId": content.ChatId,
-        "Links": users.util.append(links)
-    }
 
-    users.update(updates, key)
+    user = get_key(key)
+    if not user:
+        raise HTTPException(status_code=404, detail="Key not found")
 
-    return None
+    user_links = user['Links']
+    content_link = content.Links[0]
+    for index in range(len(user_links)):
+        if user_links[index] == content_link:
+            return {"message": "Link already exists"}
+
+    link_to_append = append_content(key, content)
+    return link_to_append
 
 
 @app.put('/trim/{key}')
 def remove_link(key: str, content: RssLink):
-    ##links = content.Links
+    user = get_key(key)
+    if not user:
+        raise HTTPException(status_code=404, detail="Key not found")
+    # links = content.Links
+
     updates = {
         "ChatId": content.ChatId,
         "Links[0]": users.util.trim()
